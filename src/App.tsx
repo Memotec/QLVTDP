@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { QRCodeSVG } from 'qrcode.react';
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 
 import { InventoryItem, SyncConfig, Role, AuditStats, AuditHistoryEntry, UsageSlip } from './types.ts';
 import { INITIAL_INVENTORY, CATEGORIES } from './initialData.ts';
@@ -2163,8 +2164,139 @@ export default function App() {
               </div>
             )}
 
-            {/* MAIN STOCK LIST TABLE */}
-            <div className={`bg-white dark:bg-slate-900 rounded-[2.2rem] border border-slate-200 dark:border-slate-850 overflow-hidden shadow-sm flex flex-col min-h-[500px] ${role === 'admin' ? 'lg:col-span-3' : 'lg:col-span-3'}`}>
+            {/* RIGHT SIDE MAIN COLUMN WRAPPER */}
+            <div className="lg:col-span-3 flex flex-col gap-6 w-full">
+              
+              {/* PIE CHART INTERACTIVE ANALYTICS CARD */}
+              {(() => {
+                const totalOk = inventory.filter(item => item.auditStatus === 'OK').reduce((sum, item) => sum + (item.qty || 0), 0);
+                const totalMissing = inventory.filter(item => item.auditStatus === 'MISSING').reduce((sum, item) => sum + (item.qty || 0), 0);
+                const totalUnchecked = inventory.filter(item => item.auditStatus === null).reduce((sum, item) => sum + (item.qty || 0), 0);
+                const totalAll = totalOk + totalMissing + totalUnchecked;
+                
+                const ratioOk = totalAll > 0 ? Math.round((totalOk / totalAll) * 100) : 0;
+                const ratioMissing = totalAll > 0 ? Math.round((totalMissing / totalAll) * 100) : 0;
+                const ratioUnchecked = totalAll > 0 ? Math.round((totalUnchecked / totalAll) * 100) : 0;
+
+                const chartData = totalAll > 0 ? [
+                  { name: 'Đủ / Tốt', value: totalOk, color: '#10B981', hoverColor: '#059669', ratio: ratioOk },
+                  { name: 'Thiếu / Hỏng', value: totalMissing, color: '#EF4444', hoverColor: '#DC2626', ratio: ratioMissing },
+                  { name: 'Chưa kiểm', value: totalUnchecked, color: '#64748B', hoverColor: '#475569', ratio: ratioUnchecked }
+                ].filter(d => d.value > 0) : [
+                  { name: 'Chưa có thiết bị', value: 1, color: '#E2E8F0', hoverColor: '#CBD5E1', ratio: 0 }
+                ];
+
+                return (
+                  <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-850 rounded-[2.2rem] p-6 shadow-sm flex flex-col md:flex-row items-center justify-between gap-6 transition-all duration-300">
+                    <div className="flex flex-col space-y-2 text-left w-full md:w-1/2">
+                      <span className="p-1 px-2.5 bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 text-[9px] font-black rounded-lg uppercase tracking-wider w-fit">
+                        Phân Tích Tổng Quan
+                      </span>
+                      <h3 className="text-base font-black text-slate-850 dark:text-white uppercase tracking-wider">
+                        Tỷ Lệ Trạng Thế Kiểm Kê
+                      </h3>
+                      <p className="text-xs text-slate-400 font-medium leading-relaxed">
+                        Biểu đồ tròn trực quan giám sát chặt chẽ tình hình hao hụt, hỏng hóc và tiến độ thực hiện kiểm đếm định kỳ toàn bộ kho tài sản Bảo Đảm Kỹ Thuật.
+                      </p>
+                      
+                      {/* Detailed mini progress bars for visual beauty */}
+                      <div className="pt-3 space-y-2.5 w-full">
+                        <div className="space-y-1">
+                          <div className="flex justify-between items-center text-[11px] font-extrabold">
+                            <span className="text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                              <span className="w-2 h-2 rounded-full bg-emerald-500"></span> Đủ / Tốt
+                            </span>
+                            <span className="text-slate-500">{totalOk} cái ({ratioOk}%)</span>
+                          </div>
+                          <div className="w-full bg-slate-100 dark:bg-slate-800 h-1.5 rounded-full overflow-hidden">
+                            <div className="bg-emerald-500 h-full rounded-full transition-all duration-500" style={{ width: `${ratioOk}%` }}></div>
+                          </div>
+                        </div>
+
+                        <div className="space-y-1">
+                          <div className="flex justify-between items-center text-[11px] font-extrabold">
+                            <span className="text-rose-500 dark:text-rose-400 flex items-center gap-1">
+                              <span className="w-2 h-2 rounded-full bg-rose-500"></span> Thiếu / Hỏng
+                            </span>
+                            <span className="text-slate-500">{totalMissing} cái ({ratioMissing}%)</span>
+                          </div>
+                          <div className="w-full bg-slate-100 dark:bg-slate-800 h-1.5 rounded-full overflow-hidden">
+                            <div className="bg-rose-500 h-full rounded-full transition-all duration-500" style={{ width: `${ratioMissing}%` }}></div>
+                          </div>
+                        </div>
+
+                        <div className="space-y-1">
+                          <div className="flex justify-between items-center text-[11px] font-extrabold">
+                            <span className="text-slate-600 dark:text-slate-400 flex items-center gap-1">
+                              <span className="w-2 h-2 rounded-full bg-slate-400"></span> Chưa kiểm kê
+                            </span>
+                            <span className="text-slate-500">{totalUnchecked} cái ({ratioUnchecked}%)</span>
+                          </div>
+                          <div className="w-full bg-slate-100 dark:bg-slate-800 h-1.5 rounded-full overflow-hidden">
+                            <div className="bg-slate-500 h-full rounded-full transition-all duration-500" style={{ width: `${ratioUnchecked}%` }}></div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Donut Pie Chart utilizing Recharts */}
+                    <div className="relative w-full md:w-1/2 h-52 flex items-center justify-center shrink-0">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                          <Pie
+                            data={chartData}
+                            cx="50%"
+                            cy="50%"
+                            innerRadius={65}
+                            outerRadius={88}
+                            paddingAngle={chartData.length > 1 ? 5 : 0}
+                            dataKey="value"
+                          >
+                            {chartData.map((entry, index) => (
+                              <Cell 
+                                key={`cell-${index}`} 
+                                fill={entry.color} 
+                                className="transition-all duration-300 stroke-transparent hover:opacity-90 outline-none"
+                              />
+                            ))}
+                          </Pie>
+                          <Tooltip
+                            content={({ active, payload }) => {
+                              if (active && payload && payload.length) {
+                                const data = payload[0].payload;
+                                return (
+                                  <div className="bg-slate-905/90 dark:bg-slate-950/95 text-white p-3 rounded-2xl border border-slate-800 shadow-xl text-[11px] font-bold">
+                                    <p className="uppercase tracking-wider" style={{ color: data.color }}>{data.name}</p>
+                                    <div className="flex justify-between gap-4 mt-1 font-medium text-slate-300 text-[10px]">
+                                      <span>Số lượng:</span>
+                                      <span className="font-extrabold text-white">{data.value} cái</span>
+                                    </div>
+                                    <div className="flex justify-between gap-4 font-medium text-slate-300 text-[10px]">
+                                      <span>Tỷ lệ:</span>
+                                      <span className="font-extrabold text-white">{data.ratio}%</span>
+                                    </div>
+                                  </div>
+                                );
+                              }
+                              return null;
+                            }}
+                          />
+                        </PieChart>
+                      </ResponsiveContainer>
+                      
+                      {/* Inner static text for donut hole */}
+                      <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                        <span className="text-[10px] uppercase font-bold text-slate-400 tracking-widest text-center leading-tight">Tổng Kho</span>
+                        <span className="text-2xl font-black text-slate-850 dark:text-white mt-0.5">{totalAll}</span>
+                        <span className="text-[9px] font-bold text-slate-500">CÁI / CHIẾC</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* MAIN STOCK LIST TABLE */}
+              <div className="bg-white dark:bg-slate-900 rounded-[2.2rem] border border-slate-200 dark:border-slate-850 overflow-hidden shadow-sm flex flex-col min-h-[500px] w-full">
               <div className="flex justify-between items-center px-6 py-4 border-b border-slate-100 dark:border-slate-800">
                 <div className="flex items-center gap-2">
                   <Layers className="w-4 h-4 text-indigo-500" />
@@ -2535,6 +2667,7 @@ export default function App() {
               </div>
             </div>
           </div>
+        </div>
         </div>
       )}
 
