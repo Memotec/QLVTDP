@@ -30,6 +30,7 @@ export interface SyncConfig {
   webAppUrl: string;
   lastSynced?: string;
   autoSync: boolean;
+  autoLoadOnStartup?: boolean;
 }
 
 export type Role = 'admin' | 'guest';

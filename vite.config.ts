@@ -4,8 +4,9 @@ import path from 'path';
 import {defineConfig} from 'vite';
 
 export default defineConfig(() => {
+  const isDev = process.env.NODE_ENV !== 'production' || process.env.DISABLE_HMR === 'true';
   return {
-    base: '/QLVTDP/',
+    base: isDev ? '/' : '/QLVTDP/',
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {

@@ -1,57 +1,45 @@
-# HƯỚNG DẪN CHẠY OFFLINE & PHÁT MẠNG LAN CHO THIẾT BỊ KHÁC
-*(Dành riêng cho Đội Thông Tin - Kho Vật Tư CNS/ATM)*
+# HƯỚNG DẪN CHẠY PHẦN MỀM OFFLINE CHO ĐỘI THÔNG TIN
+*(Hệ thống quản lý & Kiểm kê Vật tư CNS/ATM - Offline Pro)*
 
-Hệ thống quản lý vật tư này được thiết kế và tối ưu để **hoạt động hoàn toàn độc lập (Offline)** trong mạng LAN nội bộ của Đội Thông Tin mà không cần kết nối Internet. Dưới đây là cách khắc phục lỗi thiếu ổ đĩa (ổ C bị đầy) và cấu hình chi tiết.
-
----
-
-## 1. NGUYÊN NHÂN LỖI TRƯỚC ĐÓ CỦA BẠN
-1. **Lỗi `ENOSPC: no space left on device`**: Phân vùng ổ đĩa `C:\` của bạn đã bị đầy hoàn toàn. Khi chạy `npm install`, Node.js cố gắng ghi bộ nhớ tạm (Cache) vào đường dẫn mặc định trên ổ `C:\Users\...\AppData\Local\npm-cache` dẫn đến tiến trình cài đặt bị dừng đột ngột và làm thiếu file thư viện cốt lõi (`lightningcss.win32-x64-msvc.node`).
-2. **Lỗi `Cannot find module ...`**: Do việc cài đặt ở ổ C bị hỏng nên khi bạn sao chép thư mục sang ổ `D:\` và chạy, Vite không tìm thấy nhân thư viện chạy trên Windows.
+Chào bạn! Hệ thống hiện đã được cấu hình và đóng gói hoàn thiện để sẵn sàng hoạt động **hoàn toàn Offline** trong mạng nội bộ cơ quan, không cần kết nối Internet.
 
 ---
 
-## 2. CÁCH KHẮC PHỤC TRIỆT ĐỂ & CHẠY TRÊN Ổ D
+## 🚀 1. LỰA CHỌN PHƯƠNG THỨC CHẠY OFFLINE (QUA `CHAY_OFFLINE.bat`)
 
-Để cài đặt chuẩn xác nhất trên ổ `D:\`, loại bỏ tác động từ bộ nhớ đầy ở ổ `C`, hãy thực hiện các bước sau:
-
-### Bước 1: Xóa cài đặt lỗi cũ
-Mở thư mục `D:\cns_atm-inventory`, thực hiện xóa các thư mục và tệp sau đây để tránh xung đột cấu hình cũ:
-* Hủy bỏ/Xóa hoàn toàn thư mục `node_modules` (nếu có).
-* Hủy bỏ/Xóa tệp `package-lock.json` (nếu có).
-
-### Bước 2: Chạy tệp tự động cài đặt trên ổ D
-Tại thư mục gốc `D:\cns_atm-inventory`, chúng tôi đã tạo sẵn cho bạn tệp tự động hóa có tên là:
+Tại thư mục gốc ổ đĩa cài đặt (Ví dụ: `D:\QLVTDP` hoặc thư mục dự án), bạn chỉ cần **kích đúp chuột (Double-click)** vào tệp:
 👉 **`CHAY_OFFLINE.bat`**
 
-Hãy kích chuột kép (Double-click) vào tệp **`CHAY_OFFLINE.bat`** này. Tệp sẽ tự động thực hiện:
-1. Thiết lập thư mục lưu trữ cache chuyên dụng ngay tại ổ `D:\` để không bị báo lỗi đầy ổ đĩa `C`.
-2. Khôi phục hoàn tất các thư viện cần thiết tương thích với hệ điều hành Windows.
-3. Kích hoạt Server chạy mạng LAN nội bộ.
+Hệ thống sẽ cung cấp cho bạn 2 lựa chọn cực kỳ thông minh:
+
+### 👉 LỰA CHỌN 1: Chạy Bản Đóng Gói Sẵn (Khuyên Dùng - Siêu Tốc)
+* **Ưu điểm**: Chạy **tức thì chỉ sau 0.5 giây**, không cần internet tải thư viện, không sợ báo lỗi đầy ổ cứng `C:`, không lo xung đột thư viện `node_modules`.
+* **Cơ chế**: Hệ thống sử dụng một máy chủ web siêu nhỏ bằng **Node.js** (`server_offline.js`) có sẵn trên máy để phát trực tiếp các tệp tin đã được biên dịch (Folder `dist/`).
+* **Sử dụng**: Nhập phím `1` rồi nhấn `Enter`.
+
+### 👉 LỰA CHỌN 2: Cài Đặt và Chạy Chế Độ Phát Triển (Dev Mode)
+* **Cơ chế**: Tự động dọn dẹp môi trường cũ, tải/nạp các thư viện thông qua thư mục đệm tùy chỉnh (tránh lỗi tràn ổ cứng) và chạy máy chủ phục vụ phát triển.
+* **Sử dụng**: Chỉ dùng khi bạn muốn chỉnh sửa, lập trình thêm mã nguồn. Nhập phím `2` rồi nhấn `Enter`.
 
 ---
 
-## 3. PHÁT MẠNG LAN OFFLINE CHO CÁC MÁY KHÁC TRONG ĐỘI
+## 📶 2. PHÁT MẠNG LAN CHO CÁC THIẾT BỊ KHÁC TRONG ĐỘI
+Sau khi khởi chạy bằng cách kích đúp tệp `.bat`, màn hình nền đen sẽ thông báo địa chỉ truy cập cụ thể. Ví dụ:
 
-Sau khi khởi chạy ứng dụng thành công bằng tệp `.bat` hoặc qua lệnh `npm run dev -- --host`, bạn có thể cho phép các máy tính khác, máy scan hoặc điện thoại trong cùng mạng wifi/LAN vào kiểm kê như sau:
+1. **Truy cập tại chỗ (trên máy chủ của bạn)**:
+   * Đường dẫn: **`http://localhost:3000`**
 
-### Bước 1: Tìm địa chỉ IP của máy chủ của bạn
-1. Bấm tổ hợp phím `Windows + R`, gõ `cmd` rồi nhấn Enter.
-2. Gõ lệnh `ipconfig` và nhấn Enter.
-3. Tìm dòng **`IPv4 Address`** (thường có dạng `192.168.1.XX` hoặc `10.0.0.XX`). Đây chính là IP cục bộ của máy bạn.
-
-### Bước 2: Truy cập từ thiết bị khác trong Đội
-Từ điện thoại thông minh, máy tính bảng hoặc máy tính khác cùng kết nối chung Wifi/LAN cơ quan:
-1. Mở trình duyệt web (Chrome, Safari, Edge).
-2. Truy cập vào địa chỉ IP kèm cổng kết nối `3000`.
-   * Ví dụ: **`http://192.168.1.15:3000`** *(thay `192.168.1.15` bằng IP chính xác bạn tìm thấy ở Bước 1)*.
-3. Bạn đã có thể tiến hành rọi quét QR, kiểm đếm vật tư từ xa trực tiếp trên điện thoại!
+2. **Truy cập từ xa (Trưởng đội, Nhân viên kiểm kho cầm điện thoại, máy quét)**:
+   * Hãy mở trình duyệt trên điện thoại (Chrome, Safari, iOS, Android) kết nối chung mạng Wifi/LAN cơ quan.
+   * Truy cập theo **địa chỉ IP** hiển thị trên màn hình đen (Ví dụ: `http://192.168.1.15:3000`).
+   * Bạn có thể cầm điện thoại di chuyển quanh kho để quét mã vạch/QR và cập nhật số lượng trực tiếp cực kỳ thuận tiện!
 
 ---
 
-## 4. QUẢN LÝ DỮ LIỆU OFFLINE HOÀN TOÀN
-Hệ thống lưu trữ dữ liệu an toàn trên trình duyệt thông qua bộ nhớ cục bộ ổn định tốt.
-* Để chuyển dữ liệu sang máy tính khác mà không cần internet/mạng LAN: 
-  * Vào biểu tượng **Cài đặt (răng cưa)** phía trên bên phải.
-  * Nhấn vào nút **"Xuất XML/JSON Backup"** để tải file cơ sở dữ liệu vật tư về máy (hoặc lưu vào USB).
-  * Sang máy tính offline khác, nhấn **"Nhập XML/JSON Backup"** chọn file đã lưu để khôi phục tức thời 100% dữ liệu danh mục, số lượng và nhật ký kiểm kê!
+## 💾 3. QUẢN LÝ VÀ CHUYỂN ĐỔI DỮ LIỆU HOÀN TOÀN OFFLINE
+Toàn bộ dữ liệu vật tư, trạng thái kiểm kê và biểu đồ phân tích trực quan được lưu trữ trực tiếp và an toàn trong trình duyệt của bạn.
+
+* Để xuất cơ sở dữ liệu chuyển đổi sang máy khác:
+  1. Nhấn nút **Cài đặt (biểu tượng bánh răng)** ở góc trên bên phải giao diện ứng dụng.
+  2. Chọn **"Xuất XML/JSON Backup"** để tải file cơ sở dữ liệu về máy (hoặc đưa vào USB).
+  3. Sang máy offline khác, nhấn **"Nhập XML/JSON Backup"** và chọn tệp đã lưu để khôi phục chính xác 100% dữ liệu danh mục cùng lịch sử kiểm kho!

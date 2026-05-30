@@ -14,6 +14,7 @@ import {
 import * as XLSX from 'xlsx';
 import { QRCodeSVG } from 'qrcode.react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
+import { Html5Qrcode } from 'html5-qrcode';
 
 import { InventoryItem, SyncConfig, Role, AuditStats, AuditHistoryEntry, UsageSlip } from './types.ts';
 import { INITIAL_INVENTORY, CATEGORIES } from './initialData.ts';
@@ -125,15 +126,31 @@ export default function App() {
   const [scanStatus, setScanStatus] = useState<'OK' | 'MISSING'>('OK');
   const [scanNote, setScanNote] = useState('');
   const [scanMessage, setScanMessage] = useState<{ text: string; type: 'success' | 'error' | 'info' } | null>(null);
+  const [scanMode, setScanMode] = useState<'camera' | 'manual'>('camera');
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const [scanTargetItem, setScanTargetItem] = useState<InventoryItem | null>(null);
+
+  useEffect(() => {
+    if (!isScannerOpen) {
+      setScanTargetItem(null);
+    }
+  }, [isScannerOpen]);
 
   // Cloud Sync Configurations
-  const [syncConfig, setSyncConfig] = useState<SyncConfig>({
-    webAppUrl: 'https://script.google.com/macros/s/AKfycby3ecczSKLGb81GXQSqirqM0s-qQH-jQDjJpZQohnNS_aUQgtH15KzvB8JYr7LJbYql/exec',
-    autoSync: false,
-    lastSynced: undefined
+  const [syncConfig, setSyncConfig] = useState<SyncConfig>(() => {
+    const savedUrl = localStorage.getItem('cns_sync_url');
+    const savedAutoSync = localStorage.getItem('cns_auto_sync');
+    const savedAutoLoad = localStorage.getItem('cns_auto_load_startup');
+    return {
+      webAppUrl: savedUrl !== null ? savedUrl : 'https://script.google.com/macros/s/AKfycby4frQYvyEuzbVS7rctYDaxHDhSlEzNmTgYXavWzi0ROJLYEqhfwBd1QRX4v6dVU05f/exec',
+      autoSync: savedAutoSync === 'true',
+      autoLoadOnStartup: savedAutoLoad !== 'false',
+      lastSynced: undefined
+    };
   });
   const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'success' | 'error'>('idle');
   const [syncStatusDetail, setSyncStatusDetail] = useState('');
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
 
   // Toast Alerts State
   const [toasts, setToasts] = useState<{ id: string; message: string; type: 'success' | 'error' | 'info' }[]>([]);
@@ -186,11 +203,51 @@ export default function App() {
       setRole(savedRole as Role);
     }
 
-    // Load sync url
+    // Load sync config
     const savedSyncUrl = localStorage.getItem('cns_sync_url');
+    const savedAutoSync = localStorage.getItem('cns_auto_sync');
+    const savedAutoLoad = localStorage.getItem('cns_auto_load_startup');
+    let urlToUse = 'https://script.google.com/macros/s/AKfycby4frQYvyEuzbVS7rctYDaxHDhSlEzNmTgYXavWzi0ROJLYEqhfwBd1QRX4v6dVU05f/exec';
     if (savedSyncUrl) {
-      setSyncConfig(prev => ({ ...prev, webAppUrl: savedSyncUrl }));
+      urlToUse = savedSyncUrl;
     }
+    const isAutoLoadEnabled = savedAutoLoad !== 'false';
+    setSyncConfig(prev => ({
+      ...prev,
+      webAppUrl: savedSyncUrl !== null ? savedSyncUrl : prev.webAppUrl,
+      autoSync: savedAutoSync === 'true',
+      autoLoadOnStartup: isAutoLoadEnabled
+    }));
+
+    // Listen to network changes dynamically
+    const handleOnline = () => {
+      setIsOnline(true);
+      addToast('📡 Đã kết nối mạng trở lại. Bạn có thể tự do đồng bộ lên Cloud.', 'success');
+    };
+    const handleOffline = () => {
+      setIsOnline(false);
+      addToast('🔌 Đã ngắt kết nối mạng. Hệ thống tự động chuyển sang chế độ lưu Offline an toàn!', 'info');
+      setSyncStatusDetail('Chế độ ngoại tuyến (Offline) đang hoạt động.');
+    };
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    // Initial launch actions
+    if (!navigator.onLine) {
+      setSyncStatusDetail('Ngoại tuyến (Offline). Tất cả dữ liệu lưu trữ tại trình duyệt.');
+    } else if (isAutoLoadEnabled) {
+      addToast('Khởi động: Đang tự động tải danh sách thiết bị từ Google Web App...', 'info');
+      setTimeout(() => {
+        fetchCloudData(urlToUse);
+      }, 600);
+    } else {
+      setSyncStatusDetail('Đã tắt tự động tải khi mở Web.');
+    }
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
   }, []);
 
   // Sync to local storage
@@ -496,13 +553,22 @@ export default function App() {
   };
 
   // --- CLOUD SYNC LOGIC ---
-  const fetchCloudData = async () => {
+  const fetchCloudData = async (targetUrl?: string) => {
     if (syncStatus === 'syncing') return;
+
+    if (!navigator.onLine) {
+      setSyncStatus('idle');
+      setSyncStatusDetail('Ngoại tuyến (Offline). Trình duyệt lưu trữ cục bộ.');
+      addToast('Không có mạng để tải dữ liệu từ Cloud!', 'info');
+      return;
+    }
+
     setSyncStatus('syncing');
     setSyncStatusDetail('Đang tạo yêu cầu kết nối Server...');
 
     try {
-      const url = `${syncConfig.webAppUrl}?t=${Date.now()}`;
+      const activeUrl = targetUrl || syncConfig.webAppUrl;
+      const url = `${activeUrl}?t=${Date.now()}`;
       const res = await fetch(url);
       if (!res.ok) throw new Error('Yêu cầu dữ liệu thất bại từ Google Apps Script.');
       
@@ -553,6 +619,15 @@ export default function App() {
 
   const syncToCloud = async () => {
     if (syncStatus === 'syncing') return;
+
+    if (!navigator.onLine) {
+      setSyncStatus('idle');
+      setSyncStatusDetail('Không thể tải lên. Thiết bị đang Ngoại tuyến.');
+      addToast('Không có kết nối mạng để kết nối với Cloud!', 'error');
+      playScanBeep(250, 0.3);
+      return;
+    }
+
     setSyncStatus('syncing');
     setSyncStatusDetail('Đang tải dữ liệu của bạn lên Cloud...');
 
@@ -589,10 +664,16 @@ export default function App() {
 
   // Save settings change
   const saveSettingsConfig = (newUrl: string) => {
-    const cleanUrl = newUrl.trim();
-    setSyncConfig(prev => ({ ...prev, webAppUrl: cleanUrl }));
-    localStorage.setItem('cns_sync_url', cleanUrl);
-    addToast('Đã lưu cấu hình Apps Script.', 'success');
+    setSyncConfig(prev => ({ ...prev, webAppUrl: newUrl }));
+    localStorage.setItem('cns_sync_url', newUrl);
+  };
+
+  const trimSettingsConfigUrl = () => {
+    setSyncConfig(prev => {
+      const trimmedUrl = prev.webAppUrl.trim();
+      localStorage.setItem('cns_sync_url', trimmedUrl);
+      return { ...prev, webAppUrl: trimmedUrl };
+    });
   };
 
   // --- EXPORTS & PRINTS ---
@@ -1374,19 +1455,45 @@ export default function App() {
     e.target.value = '';
   };
 
-  // --- SCAN BARCODE / QR SIMULATOR PROCESSING ---
-  const handleSimulatedScanSubmit = (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    if (!scanInputCode.trim()) {
+  // --- SCAN CODE REFS FOR PREVENTING RESTART FLICKERS ---
+  const scanStatusRef = useRef<'OK' | 'MISSING'>('OK');
+  const scanNoteRef = useRef<string>('');
+  const inventoryRef = useRef<InventoryItem[]>([]);
+  const syncConfigRef = useRef<SyncConfig>({ webAppUrl: '', autoSync: false });
+  const roleRef = useRef<Role>('guest');
+
+  useEffect(() => {
+    scanStatusRef.current = scanStatus;
+  }, [scanStatus]);
+
+  useEffect(() => {
+    scanNoteRef.current = scanNote;
+  }, [scanNote]);
+
+  useEffect(() => {
+    inventoryRef.current = inventory;
+  }, [inventory]);
+
+  useEffect(() => {
+    syncConfigRef.current = syncConfig;
+  }, [syncConfig]);
+
+  useEffect(() => {
+    roleRef.current = role || 'guest';
+  }, [role]);
+
+  // --- UNIFIED CODE SCANNING LOGIC ---
+  const processScannedCode = (code: string, status: 'OK' | 'MISSING', note: string): boolean => {
+    if (!code.trim()) {
       setScanMessage({ text: 'Vui lòng chọn hoặc nhập mã hàng rọi quét!', type: 'error' });
       playScanBeep(200, 0.3);
-      return;
+      return false;
     }
 
-    const cleanCode = scanInputCode.trim().toUpperCase();
+    const cleanCode = code.trim().toUpperCase();
     
     // Search by either Warehouse Code (Mã Kho) or Serial Number (S/N)
-    const matchingItemsIdx = inventory.reduce<number[]>((acc, item, idx) => {
+    const matchingItemsIdx = inventoryRef.current.reduce<number[]>((acc, item, idx) => {
       if (
         (item.warehouse && item.warehouse.toUpperCase() === cleanCode) ||
         item.sn.toUpperCase() === cleanCode
@@ -1402,34 +1509,34 @@ export default function App() {
         type: 'error' 
       });
       playScanBeep(200, 0.4);
-      return;
+      return false;
     }
 
     // Update state of found item(s)
     const nowStr = new Date().toLocaleString('vi-VN');
-    const updated = [...inventory];
+    const updated = [...inventoryRef.current];
     
     matchingItemsIdx.forEach(idx => {
       const i = updated[idx];
       const entry: AuditHistoryEntry = {
         id: `h-${Date.now()}-${idx}`,
-        status: scanStatus,
+        status: status,
         date: nowStr,
-        note: scanNote.trim() || 'Kiểm kê tự động bằng hệ thống quét ảo',
-        user: role || 'guest'
+        note: note.trim() || 'Kiểm kê tự động bằng hệ thống quét QR',
+        user: roleRef.current || 'guest'
       };
       
       updated[idx] = {
         ...i,
-        auditStatus: scanStatus,
+        auditStatus: status,
         auditDate: nowStr,
-        auditNote: scanNote.trim() || 'Quét mã xác nhận Đủ',
+        auditNote: note.trim() || 'Quét mã xác nhận Đủ',
         history: i.history ? [entry, ...i.history] : [entry]
       };
     });
 
     saveInventoryLocally(updated);
-    playScanBeep(scanStatus === 'OK' ? 1047 : 330, 0.16); // High pitch beep for OK, lower for warning
+    playScanBeep(status === 'OK' ? 1047 : 330, 0.16); // High pitch beep for OK, lower for warning
     setScanMessage({ 
       text: `Đã cập nhật trạng thái kiểm cho ${matchingItemsIdx.length} mã thiết bị khớp với: ${cleanCode}!`, 
       type: 'success' 
@@ -1437,12 +1544,98 @@ export default function App() {
     setScanNote('');
     setScanInputCode('');
 
-    addToast(`Quét thành công! Thiết bị đã được đánh dấu ${scanStatus === 'OK' ? 'ĐỦ' : 'THIẾU'}.`, 'success');
+    addToast(`Quét thành công! Thiết bị đã được đánh dấu ${status === 'OK' ? 'ĐỦ' : 'THIẾU'}.`, 'success');
+
+    if (scanTargetItem) {
+      const isTargetMatched = matchingItemsIdx.some(idx => {
+        const item = updated[idx];
+        return (item.sn.toUpperCase() === cleanCode || (item.warehouse && item.warehouse.toUpperCase() === cleanCode));
+      });
+      if (isTargetMatched) {
+        addToast(`🎯 Đã kiểm khớp mục tiêu: ${scanTargetItem.name}!`, 'success');
+      }
+    }
 
     // Trigger Cloud Autosync if checked
-    if (syncConfig.autoSync) {
-      syncToCloud();
+    if (syncConfigRef.current.autoSync) {
+      setTimeout(() => {
+        syncToCloud();
+      }, 300);
     }
+    return true;
+  };
+
+  // --- HARDWARE CAMERA QR SCANNER ENGINE ---
+  const qrScannerRef = useRef<Html5Qrcode | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    if (isScannerOpen && scanMode === 'camera') {
+      const timer = setTimeout(() => {
+        if (!active) return;
+        setCameraError(null);
+        try {
+          const scanner = new Html5Qrcode("qr-reader");
+          qrScannerRef.current = scanner;
+          
+          scanner.start(
+            { facingMode: "environment" },
+            {
+              fps: 10,
+              qrbox: (width, height) => {
+                const side = Math.min(width, height) * 0.7;
+                return { width: Math.min(side, 250), height: Math.min(side, 180) };
+              }
+            },
+            (decodedText) => {
+              // Retrieve current status and note from refs to avoid camera restarts
+              const curStatus = scanStatusRef.current;
+              const curNote = scanNoteRef.current;
+              
+              setScanInputCode(decodedText);
+              processScannedCode(decodedText, curStatus, curNote);
+            },
+            () => {
+              // quiet errors during continuous frame scans
+            }
+          ).catch((err) => {
+            console.warn("Camera init failed, falling back to manual:", err);
+            if (active) {
+              setCameraError("Không thể kích hoạt Camera hoặc trình kiểm duyệt không tương thích. Vui lòng sử dụng chế độ nhập mã thủ công dưới đây.");
+              setScanMode('manual');
+            }
+          });
+        } catch (e: any) {
+          console.warn("Html5Qrcode element/runtime error:", e);
+          if (active) {
+            setCameraError(e.message || "Lỗi khởi chạy camera.");
+            setScanMode('manual');
+          }
+        }
+      }, 350);
+
+      return () => {
+        active = false;
+        clearTimeout(timer);
+        if (qrScannerRef.current) {
+          const scanner = qrScannerRef.current;
+          if (scanner.isScanning) {
+            scanner.stop()
+              .then(() => {
+                try { scanner.clear(); } catch(e){}
+              })
+              .catch(err => console.log("Stop scan failure:", err));
+          }
+          qrScannerRef.current = null;
+        }
+      };
+    }
+  }, [isScannerOpen, scanMode]); // Only bind to scanner modal opening and scanMode switching!
+
+  // --- SCAN BARCODE / QR SIMULATOR PROCESSING ---
+  const handleSimulatedScanSubmit = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    processScannedCode(scanInputCode, scanStatus, scanNote);
   };
 
   // Immediate layout print
@@ -1788,7 +1981,7 @@ export default function App() {
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Tìm kiếm: Tên thiết bị, P/N, S/N, Mã Kho..."
-                className="w-full pl-11 pr-10 py-3 rounded-2xl border border-slate-200 dark:border-slate-750 bg-slate-50 dark:bg-slate-800/40 text-slate-900 dark:text-white outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all text-smplaceholder:text-slate-400"
+                className="w-full pl-11 pr-10 py-3 rounded-2xl border border-slate-200 dark:border-slate-750 bg-slate-50 dark:bg-slate-800/40 text-slate-900 dark:text-white outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all text-sm placeholder:text-slate-400"
               />
               {searchQuery && (
                 <button
@@ -2294,9 +2487,12 @@ export default function App() {
                   </div>
                 );
               })()}
+            </div>
+          </div>
 
-              {/* MAIN STOCK LIST TABLE */}
-              <div className="bg-white dark:bg-slate-900 rounded-[2.2rem] border border-slate-200 dark:border-slate-850 overflow-hidden shadow-sm flex flex-col min-h-[500px] w-full">
+          {/* MAIN STOCK LIST TABLE - Spanning full width for perfect symmetry and balanced layout */}
+          <div className="mt-6 w-full">
+            <div className="bg-white dark:bg-slate-900 rounded-[2.2rem] border border-slate-200 dark:border-slate-850 overflow-hidden shadow-sm flex flex-col min-h-[350px] w-full">
               <div className="flex justify-between items-center px-6 py-4 border-b border-slate-100 dark:border-slate-800">
                 <div className="flex items-center gap-2">
                   <Layers className="w-4 h-4 text-indigo-500" />
@@ -2323,13 +2519,13 @@ export default function App() {
                 <table className="w-full text-xs text-left whitespace-nowrap min-w-[750px]">
                   <thead className="bg-slate-50 dark:bg-slate-800/80 sticky top-0 border-b border-slate-100 dark:border-slate-800 text-[10px] uppercase font-black tracking-wider text-slate-400">
                     <tr>
-                      <th className="px-5 py-3 w-12 text-center">STT</th>
-                      <th className="px-5 py-3">Danh xưng & Thông số</th>
-                      <th className="px-5 py-3">Serial (S/N)</th>
-                      <th className="px-5 py-3 text-center">Mã Kho (QR)</th>
-                      <th className="px-5 py-3 text-center w-20">SL</th>
-                      <th className="px-5 py-3 text-center">Tình hình (Kiểm)</th>
-                      <th className="px-5 py-3 text-center w-24">Thao tác</th>
+                      <th className="px-4 py-3 w-[6%] text-center">STT</th>
+                      <th className="px-4 py-3 w-[37%] text-left">Danh xưng & Thông số</th>
+                      <th className="px-4 py-3 w-[17%] text-left">Serial (S/N)</th>
+                      <th className="px-4 py-3 w-[13%] text-center">Mã Kho (QR)</th>
+                      <th className="px-4 py-3 w-[7%] text-center">SL</th>
+                      <th className="px-4 py-3 w-[10%] text-center">Tình hình (Kiểm)</th>
+                      <th className="px-4 py-3 w-[10%] text-center">Thao tác</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800/40">
@@ -2347,9 +2543,12 @@ export default function App() {
                     ) : (
                       filteredInventory.map((item, idx) => {
                         return (
-                          <tr key={item.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-850/30 transition-all group">
-                            <td className="px-5 py-4 text-center font-bold text-slate-400">{idx + 1}</td>
-                            <td className="px-5 py-3.5">
+                          <tr 
+                            key={item.id} 
+                            className={`${idx % 2 === 0 ? 'bg-white dark:bg-slate-900' : 'bg-slate-50/30 dark:bg-slate-850/15'} hover:bg-slate-100/50 dark:hover:bg-slate-800/40 transition-all group`}
+                          >
+                            <td className="px-4 py-3.5 text-center font-bold text-slate-400">{idx + 1}</td>
+                            <td className="px-4 py-3">
                               <div className="flex flex-col">
                                 <span className="font-extrabold text-slate-900 dark:text-white hover:text-indigo-600 transition-colors cursor-pointer" onClick={() => setSelectedItemDetail(item)}>
                                   {item.name}
@@ -2371,8 +2570,8 @@ export default function App() {
                                 </div>
                               </div>
                             </td>
-                            <td className="px-5 py-4 font-mono font-semibold text-slate-700 dark:text-slate-300">{item.sn}</td>
-                            <td className="px-5 py-4 text-center">
+                            <td className="px-4 py-3.5 font-mono font-semibold text-slate-700 dark:text-slate-300">{item.sn}</td>
+                            <td className="px-4 py-3.5 text-center">
                               {item.warehouse ? (
                                 <span className="inline-block bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-450 px-2 py-0.5 rounded font-black text-[10px] border border-indigo-100/50 dark:border-indigo-900/35 uppercase">
                                   {item.warehouse}
@@ -2381,16 +2580,16 @@ export default function App() {
                                 <span className="text-slate-350 italic text-[10px]">- Chưa cấp -</span>
                               )}
                             </td>
-                            <td className="px-5 py-4 text-center font-black text-slate-800 dark:text-slate-200">{item.qty}</td>
-                            <td className="px-5 py-4 text-center">
+                            <td className="px-4 py-3.5 text-center font-black text-slate-800 dark:text-slate-200">{item.qty}</td>
+                            <td className="px-4 py-3.5 text-center">
                               <div className="flex flex-col items-center gap-1">
                                 {item.auditStatus === 'OK' ? (
                                   <span className="inline-flex items-center gap-0.5 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 px-2 py-0.5 rounded font-extrabold text-[10px] border border-emerald-100 dark:border-emerald-900/30">
-                                    ● ĐỦ / TỐT
+                                    ● ĐỦ / TỐT
                                   </span>
                                 ) : item.auditStatus === 'MISSING' ? (
                                   <span className="inline-flex items-center gap-0.5 bg-rose-50 dark:bg-rose-955/40 text-rose-600 dark:text-rose-450 px-2 py-0.5 rounded font-extrabold text-[10px] border border-rose-100 dark:border-rose-900/30">
-                                    ▲ THIẾU
+                                    ▲ THIẾU
                                   </span>
                                 ) : (
                                   <span className="inline-flex items-center gap-0.5 bg-slate-50 dark:bg-slate-800 text-slate-400 px-2 py-0.5 rounded font-bold text-[10px] border border-slate-200 dark:border-slate-750">
@@ -2404,7 +2603,7 @@ export default function App() {
                                 )}
                               </div>
                             </td>
-                            <td className="px-5 py-4">
+                            <td className="px-4 py-3.5">
                               <div className="flex items-center gap-2.5 justify-center">
                                 {/* Quick verification checkboxes */}
                                 <div className="flex items-center bg-slate-100 dark:bg-slate-800 rounded-lg p-0.5 border border-slate-200/50 dark:border-slate-700">
@@ -2606,6 +2805,22 @@ export default function App() {
 
                           {/* Detail lookups & Admin modifiers - clear touch sizes */}
                           <div className="flex items-center gap-1.5">
+                            {/* Nút rọi quét Camera kiểm kê nhanh cho thiết bị này */}
+                            <button
+                              onClick={() => {
+                                setScanTargetItem(item);
+                                setScanMode('camera');
+                                setScanInputCode(item.warehouse || item.sn);
+                                setIsScannerOpen(true);
+                                setScanMessage(null);
+                                playScanBeep(1000, 0.12);
+                              }}
+                              className="w-9 h-9 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 hover:bg-indigo-100 dark:hover:bg-indigo-900/30 border border-indigo-200/55 dark:border-indigo-900/40 flex items-center justify-center text-indigo-650 dark:text-indigo-400 transition-colors cursor-pointer"
+                              title="Quét Camera kiểm kê thiết bị này nhanh chóng"
+                            >
+                              <Camera className="w-4 h-4 animate-pulse" />
+                            </button>
+
                             <button
                               onClick={() => setSelectedItemDetail(item)}
                               className="w-9 h-9 rounded-xl bg-slate-50 dark:bg-slate-850 hover:bg-slate-100 border border-slate-250 dark:border-slate-750 flex items-center justify-center text-slate-700 dark:text-slate-300 transition-colors cursor-pointer"
@@ -2642,7 +2857,7 @@ export default function App() {
                                 </button>
                                 <button
                                   onClick={() => handleDeleteClick(item)}
-                                  className="w-9 h-9 rounded-xl bg-rose-50 hover:bg-rose-100 border border-rose-100/30 dark:bg-rose-955/40 dark:hover:bg-rose-900/30 flex items-center justify-center text-rose-600 dark:text-rose-450 transition-colors cursor-pointer"
+                                  className="w-9 h-9 rounded-xl bg-rose-50 hover:bg-rose-100 border border-rose-100/30 dark:bg-rose-955/40 dark:hover:bg-rose-900/30 flex items-center justify-center text-rose-600 dark:text-rose-455 transition-colors cursor-pointer"
                                   title="Xóa thiết bị"
                                 >
                                   <Trash2 className="w-4 h-4" />
@@ -2668,110 +2883,201 @@ export default function App() {
             </div>
           </div>
         </div>
-        </div>
       )}
 
-      {/* --- EXTRA ADVANCED MODAL: SCANNER SIMULATOR CLIENT --- */}
+      {/* --- EXTRA ADVANCED MODAL: SCANNER ENGINE AND FALLBACK MODAL --- */}
       {isScannerOpen && (
-        <div className="fixed inset-0 bg-slate-950/60 dark:bg-black/90 backdrop-blur-md flex items-center justify-center z-[80000] p-4">
-          <div className="bg-white dark:bg-slate-900 rounded-[2.2rem] shadow-2xl w-full max-w-lg border border-slate-100 dark:border-slate-800/80 overflow-hidden animate-scale-in">
+        <div className="fixed inset-0 bg-slate-950/70 dark:bg-black/95 backdrop-blur-md flex items-center justify-center z-[80000] p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-[2.2rem] shadow-2xl w-full max-w-xl border border-slate-100 dark:border-slate-800/80 overflow-hidden animate-scale-in">
             
             {/* Header */}
             <div className="px-6 py-4.5 bg-slate-50 dark:bg-slate-850 border-b border-slate-150 dark:border-slate-800 flex justify-between items-center">
-              <h3 className="font-black text-slate-900 dark:text-white text-base flex items-center gap-2">
-                <Camera className="w-5 h-5 text-indigo-500" />
-                Kiểm Kê Thiết Bị Qua Quét Mã (Simulated)
-              </h3>
+              <div className="flex flex-col">
+                <h3 className="font-black text-slate-900 dark:text-white text-base flex items-center gap-2">
+                  <Camera className="w-5 h-5 text-indigo-500 animate-pulse" />
+                  Kiểm Kê Thiết Bị Qua Quét Mã
+                </h3>
+                <span className="text-[10px] text-slate-400 font-medium mt-0.5">Sử dụng Camera trực tiếp hoặc giả lập nhập tay</span>
+              </div>
               <button
                 onClick={() => setIsScannerOpen(false)}
-                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer w-8 h-8 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-center transition-all"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            {/* Simulated Feed Viewport */}
-            <div className="relative bg-slate-900 h-44 flex items-center justify-center overflow-hidden">
-              <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_transparent_40%,_rgba(0,0,0,0.4)_100%)]"></div>
-              
-              {/* Scan Reticle corners styling */}
-              <div className="absolute w-36 h-28 border-2 border-indigo-400/40 rounded-xl flex items-center justify-center">
-                <div className="absolute top-[-3px] left-[-3px] w-6 h-6 border-t-4 border-l-4 border-indigo-500 rounded-tl-lg"></div>
-                <div className="absolute top-[-3px] right-[-3px] w-6 h-6 border-t-4 border-r-4 border-indigo-500 rounded-tr-lg"></div>
-                <div className="absolute bottom-[-3px] left-[-3px] w-6 h-6 border-b-4 border-l-4 border-indigo-500 rounded-bl-lg"></div>
-                <div className="absolute bottom-[-3px] right-[-3px] w-6 h-6 border-b-4 border-r-4 border-indigo-500 rounded-br-lg"></div>
-                <QrCode className="w-12 h-12 text-indigo-400/30 animate-pulse" />
-              </div>
-
-              {/* Laser line effect */}
-              <div className="scanner-laser"></div>
-
-              {/* Terminal status line overlay */}
-              <div className="absolute top-3 left-4 text-[9px] font-mono text-emerald-400 tracking-widest flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-ping"></span>
-                <span>CHÚ Ý: MODULE SCANNER ONLINE</span>
-              </div>
+            {/* Mode selection tabs */}
+            <div className="px-6 pt-4 flex gap-2 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50">
+              <button
+                type="button"
+                onClick={() => {
+                  setScanMode('camera');
+                  setScanMessage(null);
+                }}
+                className={`pb-3 text-xs font-bold relative transition-all uppercase tracking-wider px-3 cursor-pointer flex items-center gap-1.5 ${
+                  scanMode === 'camera'
+                    ? 'text-indigo-650 dark:text-indigo-400 border-b-2 border-indigo-650 dark:border-indigo-400 font-black'
+                    : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-350'
+                }`}
+              >
+                <Camera className="w-3.5 h-3.5" />
+                Quét Camera Thật
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setScanMode('manual');
+                  setScanMessage(null);
+                }}
+                className={`pb-3 text-xs font-bold relative transition-all uppercase tracking-wider px-3 cursor-pointer flex items-center gap-1.5 ${
+                  scanMode === 'manual'
+                    ? 'text-indigo-650 dark:text-indigo-400 border-b-2 border-indigo-650 dark:border-indigo-400 font-black'
+                    : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-350'
+                }`}
+              >
+                <QrCode className="w-3.5 h-3.5" />
+                Dùng Mã Có Sẵn / Nhập Tay
+              </button>
             </div>
+
+            {/* Target item indicator if applicable */}
+            {scanTargetItem && (
+              <div className="mx-6 mt-4 p-3.5 bg-indigo-50 dark:bg-indigo-950/20 border border-indigo-150 dark:border-indigo-900/40 rounded-2xl flex items-center justify-between gap-3 shadow-xs">
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="relative flex h-2.5 w-2.5">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-indigo-500"></span>
+                  </span>
+                  <span className="text-[10px] uppercase font-black text-indigo-700 dark:text-indigo-450 tracking-wider">MỤC TIÊU KIỂM TIẾP:</span>
+                </div>
+                <div className="text-right min-w-0 flex-1">
+                  <p className="text-xs font-black text-slate-900 dark:text-white truncate">{scanTargetItem.name}</p>
+                  <p className="text-[9.5px] font-mono text-slate-500 dark:text-slate-400 truncate">
+                    S/N: <span className="font-extrabold text-indigo-650 dark:text-indigo-400">{scanTargetItem.sn}</span>
+                    {scanTargetItem.warehouse && <> | Mã Kho: <span className="font-extrabold text-indigo-650 dark:text-indigo-400">{scanTargetItem.warehouse}</span></>}
+                  </p>
+                </div>
+              </div>
+            )}
 
             {/* Form controls */}
             <form onSubmit={handleSimulatedScanSubmit} className="p-6 space-y-4">
-              <div>
-                <label className="block text-[10px] font-bold text-slate-400 mb-1.5 uppercase ml-1">
-                  Nhập mã quét thiết bị (Mã Kho hoặc S/N) *
-                </label>
-                <div className="relative">
-                  <input
-                    type="text"
-                    required
-                    value={scanInputCode}
-                    onChange={(e) => {
-                      setScanInputCode(e.target.value);
-                      if (scanMessage) setScanMessage(null);
-                    }}
-                    placeholder="VD: KHO-VHF-01 hoặc RS100429402"
-                    className="w-full text-center px-4 py-3 rounded-xl border border-slate-250 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/40 text-slate-900 dark:text-white outline-none focus:border-indigo-500 text-sm font-mono font-bold"
-                  />
-                </div>
-              </div>
+              
+              {/* Scan viewport depending on selected tab */}
+              {scanMode === 'camera' ? (
+                <div className="space-y-3">
+                  {/* Real video feed element target styled with precise guidelines */}
+                  <div className="relative bg-black rounded-2xl h-56 flex flex-col items-center justify-center overflow-hidden border border-slate-700 dark:border-slate-750">
+                    <div id="qr-reader" className="w-full h-full"></div>
+                    
+                    {/* Laser overlay HUD rendering over camera feed */}
+                    <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+                      <div className="absolute w-44 h-36 border-2 border-dashed border-indigo-500/40 rounded-xl flex items-center justify-center">
+                        <div className="absolute top-[-3px] left-[-3px] w-6 h-6 border-t-4 border-l-4 border-indigo-500 rounded-tl-lg"></div>
+                        <div className="absolute top-[-3px] right-[-3px] w-6 h-6 border-t-4 border-r-4 border-indigo-500 rounded-tr-lg"></div>
+                        <div className="absolute bottom-[-3px] left-[-3px] w-6 h-6 border-b-4 border-l-4 border-indigo-500 rounded-bl-lg"></div>
+                        <div className="absolute bottom-[-3px] right-[-3px] w-6 h-6 border-b-4 border-r-4 border-indigo-500 rounded-br-lg"></div>
+                        <QrCode className="w-12 h-12 text-indigo-400/20 animate-pulse" />
+                      </div>
+                      <div className="scanner-laser"></div>
+                    </div>
 
-              {/* Quick simulation pills triggers */}
-              <div className="bg-slate-50 dark:bg-slate-850 p-3 rounded-2xl">
-                <span className="block text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-2 text-center">
-                  Nhấp vào mã thử nghiệm nhanh để rọi quét (S/N / Mã Kho)
-                </span>
-                <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto custom-scrollbar justify-center">
-                  {inventory.map(item => (
-                    <button
-                      key={item.id}
-                      type="button"
-                      onClick={() => {
-                        setScanInputCode(item.warehouse || item.sn);
-                        setScanMessage(null);
-                        playScanBeep(600, 0.05);
+                    <div className="absolute bottom-3 left-4 text-[9px] font-mono text-emerald-400 tracking-widest flex items-center gap-1.5 bg-black/60 px-2 py-1 rounded-md backdrop-blur-xs">
+                      <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-ping"></span>
+                      <span>CAMERA ĐANG HOẠT ĐỘNG</span>
+                    </div>
+                  </div>
+
+                  <p className="text-[10px] text-slate-400 text-center leading-relaxed font-medium">
+                    Hãy cho mượn quyền Camera, đưa mã QR của thiết bị hoặc thẻ tài sản dán trên máy vào vùng căn giữa của ống kính để quét.
+                  </p>
+
+                  {cameraError && (
+                    <div className="p-3 bg-rose-50 dark:bg-rose-950/20 text-rose-600 dark:text-rose-450 rounded-xl border border-rose-100 dark:border-rose-900/35 text-[11px] font-medium leading-relaxed flex items-start gap-1.5">
+                      <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                      <div>
+                        {cameraError} 
+                        <span className="block mt-1 font-bold text-indigo-500 dark:text-indigo-400 cursor-pointer" onClick={() => setScanMode('manual')}>👉 Bấm vào đây để chuyển sang rập mã nhập tay nhanh chóng!</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-3.5">
+                  {/* Simulated Feed Viewport for user consistency */}
+                  <div className="relative bg-slate-900 h-36 rounded-2xl flex items-center justify-center overflow-hidden border border-slate-750">
+                    <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_transparent_40%,_rgba(0,0,0,0.4)_100%)]"></div>
+                    <div className="absolute w-32 h-24 border border-indigo-500/25 rounded-xl flex items-center justify-center">
+                      <QrCode className="w-10 h-10 text-indigo-400/20" />
+                    </div>
+                    <div className="scanner-laser"></div>
+                    <div className="absolute top-3 left-4 text-[8.5px] font-mono text-amber-400 tracking-widest flex items-center gap-1 bg-black/60 px-2 py-1 rounded-md">
+                      <span>CHẾ ĐỘ MÔ PHỎNG / NHẬP TAY</span>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-400 mb-1.5 uppercase ml-1">
+                      Nhập mã quét thiết bị (Mã Kho hoặc S/N) *
+                    </label>
+                    <input
+                      type="text"
+                      required={scanMode === 'manual'}
+                      value={scanInputCode}
+                      onChange={(e) => {
+                        setScanInputCode(e.target.value);
+                        if (scanMessage) setScanMessage(null);
                       }}
-                      className="px-2.5 py-1 bg-white hover:bg-indigo-50 dark:bg-slate-800 dark:hover:bg-slate-750 border border-slate-200 dark:border-slate-700 rounded-lg text-[10px] font-mono text-slate-600 dark:text-slate-300 font-bold hover:border-indigo-400 transition-colors shrink-0 cursor-pointer"
-                    >
-                      {item.warehouse || item.sn.slice(0, 6) + '...'}
-                    </button>
-                  ))}
+                      placeholder="VD: KHO-VHF-01 hoặc RS100429402"
+                      className="w-full text-center px-4 py-3 rounded-xl border border-slate-250 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/40 text-slate-900 dark:text-white outline-none focus:border-indigo-500 text-sm font-mono font-bold"
+                    />
+                  </div>
+
+                  {/* Quick selection code triggers */}
+                  <div className="bg-slate-50 dark:bg-slate-850 p-3 rounded-2xl border border-slate-150 dark:border-slate-800">
+                    <span className="block text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-2 text-center">
+                      Nhấp vào thiết bị để chọn nhanh mã quét:
+                    </span>
+                    <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto custom-scrollbar justify-center">
+                      {inventory.map(item => (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() => {
+                            setScanInputCode(item.warehouse || item.sn);
+                            setScanMessage(null);
+                            playScanBeep(600, 0.05);
+                          }}
+                          className="px-2.5 py-1 bg-white hover:bg-indigo-50 dark:bg-slate-800 dark:hover:bg-slate-750 border border-slate-200 dark:border-slate-700 rounded-lg text-[10px] font-mono text-slate-600 dark:text-slate-300 font-bold hover:border-indigo-400 transition-colors shrink-0 cursor-pointer"
+                        >
+                          {item.warehouse || item.sn.slice(0, 6) + '...'}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 </div>
-              </div>
+              )}
 
-              {/* Status Radio buttons */}
-              <div className="grid grid-cols-2 gap-3 pt-1">
-                <label className="flex items-center justify-center gap-1.5 p-2.5 rounded-xl border-2 cursor-pointer transition-all text-xs font-bold font-sans tracking-wide bg-slate-50 dark:bg-slate-850 hover:bg-slate-100 dark:hover:bg-slate-800 border-transparent has-checked:border-emerald-500 has-checked:bg-emerald-50/20 dark:has-checked:bg-emerald-950/20">
-                  <input
-                    type="radio"
-                    name="scanStatus"
-                    checked={scanStatus === 'OK'}
-                    onChange={() => setScanStatus('OK')}
-                    className="sr-only"
-                  />
-                  <CheckCircle2 className={`w-4 h-4 ${scanStatus==='OK'?'text-emerald-500':'text-slate-400'}`} />
-                  <span className={scanStatus==='OK'?'text-emerald-500':'text-slate-500 dark:text-slate-400'}>ĐỦ / TỐT (OK)</span>
+              {/* Status Radio buttons (common for both modes) */}
+              <div className="space-y-1.5">
+                <label className="block text-[10px] font-bold text-slate-400 uppercase ml-1">
+                  Đánh dấu trạng thái kiểm kê sau khi quét *
                 </label>
+                <div className="grid grid-cols-2 gap-3">
+                  <label className="flex items-center justify-center gap-1.5 p-3 rounded-xl border-2 cursor-pointer transition-all text-xs font-bold font-sans tracking-wide bg-slate-50 dark:bg-slate-850 hover:bg-slate-100 dark:hover:bg-slate-800 border-transparent has-checked:border-emerald-500 has-checked:bg-emerald-50/20 dark:has-checked:bg-emerald-950/20">
+                    <input
+                      type="radio"
+                      name="scanStatus"
+                      checked={scanStatus === 'OK'}
+                      onChange={() => setScanStatus('OK')}
+                      className="sr-only"
+                    />
+                    <CheckCircle2 className={`w-4 h-4 ${scanStatus==='OK'?'text-emerald-500':'text-slate-400'}`} />
+                    <span className={scanStatus==='OK'?'text-emerald-500':'text-slate-550 dark:text-slate-400'}>ĐỦ / TỐT (OK)</span>
+                  </label>
 
-                <label className="flex items-center justify-center gap-1.5 p-2.5 rounded-xl border-2 cursor-pointer transition-all text-xs font-bold font-sans tracking-wide bg-slate-50 dark:bg-slate-850 hover:bg-slate-100 dark:hover:bg-slate-800 border-transparent has-checked:border-rose-500 has-checked:bg-rose-50/20 dark:has-checked:bg-rose-950/20">
+                  <label className="flex items-center justify-center gap-1.5 p-3 rounded-xl border-2 cursor-pointer transition-all text-xs font-bold font-sans tracking-wide bg-slate-50 dark:bg-slate-850 hover:bg-slate-100 dark:hover:bg-slate-800 border-transparent has-checked:border-rose-500 has-checked:bg-rose-50/20 dark:has-checked:bg-rose-950/20">
                   <input
                     type="radio"
                     name="scanStatus"
@@ -2783,6 +3089,7 @@ export default function App() {
                   <span className={scanStatus==='MISSING'?'text-rose-500':'text-slate-500 dark:text-slate-400'}>THIẾU / HỎNG</span>
                 </label>
               </div>
+            </div>
 
               {/* Optional comments notes */}
               <div>
@@ -2833,8 +3140,8 @@ export default function App() {
       {/* --- SETTINGS / GOOGLE APPS SCRIPT SYNC CONFIG --- */}
       {isSettingsOpen && (
         <div className="fixed inset-0 bg-slate-900/60 dark:bg-black/80 backdrop-blur-md flex items-center justify-center z-[80000] p-4">
-          <div className="bg-white dark:bg-slate-900 rounded-[2.2rem] shadow-2xl w-full max-w-md border border-slate-100 dark:border-slate-800 overflow-hidden animate-scale-in">
-            <div className="px-6 py-4.5 bg-slate-50 dark:bg-slate-850 border-b border-slate-150 dark:border-slate-800 flex justify-between items-center">
+          <div className="bg-white dark:bg-slate-900 rounded-[2.2rem] shadow-2xl w-full max-w-md border border-slate-100 dark:border-slate-800 overflow-hidden animate-scale-in flex flex-col max-h-[90vh]">
+            <div className="px-6 py-4.5 bg-slate-50 dark:bg-slate-850 border-b border-slate-150 dark:border-slate-800 flex justify-between items-center shrink-0">
               <h3 className="font-extrabold text-slate-800 dark:text-white text-sm flex items-center gap-2">
                 <Settings className="w-4.5 h-4.5 text-indigo-500" />
                 Cài Đặt Đồng Bộ Google Apps Script
@@ -2847,7 +3154,7 @@ export default function App() {
               </button>
             </div>
 
-            <div className="p-6 space-y-4">
+            <div className="p-6 space-y-4 overflow-y-auto flex-1 custom-scrollbar">
               <div className="p-3.5 bg-indigo-50/50 dark:bg-indigo-950/20 border border-indigo-100/30 dark:border-indigo-900/40 rounded-2xl space-y-1">
                 <span className="text-[10px] uppercase font-black text-indigo-700 dark:text-indigo-400 tracking-wider">Lưu ý chuyên nghiệp:</span>
                 <p className="text-[11.5px] text-indigo-750 dark:text-indigo-350 leading-relaxed">
@@ -2856,13 +3163,17 @@ export default function App() {
               </div>
 
               <div>
-                <label className="block text-[10px] font-bold text-slate-400 mb-1.5 uppercase ml-1">
-                  Đường dẫn triển khai Google Web App *
+                <label className="text-[10px] font-bold text-slate-450 dark:text-slate-400 mb-1.5 uppercase ml-1 flex justify-between items-center">
+                  <span>Đường dẫn triển khai Google Web App *</span>
+                  <span className="text-emerald-500 font-extrabold text-[9.5px] flex items-center gap-1">
+                    <Check className="w-3.5 h-3.5" /> Tự động ghi nhớ
+                  </span>
                 </label>
                 <textarea
                   rows={3}
                   value={syncConfig.webAppUrl}
                   onChange={(e) => saveSettingsConfig(e.target.value)}
+                  onBlur={trimSettingsConfigUrl}
                   className="w-full px-4 py-2.5 rounded-xl border border-slate-250 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/40 text-slate-950 dark:text-white font-mono text-xs outline-none focus:border-indigo-400 resize-none leading-relaxed"
                   placeholder="https://script.google.com/macros/s/..."
                 />
@@ -2878,11 +3189,58 @@ export default function App() {
                   <input
                     type="checkbox"
                     checked={syncConfig.autoSync}
-                    onChange={(e) => setSyncConfig(prev => ({ ...prev, autoSync: e.target.checked }))}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setSyncConfig(prev => ({ ...prev, autoSync: checked }));
+                      localStorage.setItem('cns_auto_sync', String(checked));
+                      addToast(checked ? 'Đã bật tự động đồng bộ lên Cloud.' : 'Đã tắt tự động đồng bộ.', 'info');
+                    }}
                     className="sr-only peer"
                   />
                   <div className="w-9 h-5 bg-slate-200 dark:bg-slate-750 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-650"></div>
                 </label>
+              </div>
+
+              {/* Auto download startup configuration */}
+              <div className="flex items-center justify-between p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-850 border border-slate-200/50 dark:border-slate-800">
+                <div className="space-y-0.5">
+                  <span className="text-xs font-extrabold text-slate-850 dark:text-white">Tải dữ liệu khi mở Web</span>
+                  <p className="text-[10px] text-slate-400">Tự động kết nối Cloud kéo cơ sở dữ liệu khi vừa tải trang</p>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={syncConfig.autoLoadOnStartup}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setSyncConfig(prev => ({ ...prev, autoLoadOnStartup: checked }));
+                      localStorage.setItem('cns_auto_load_startup', String(checked));
+                      addToast(checked ? 'Đã bật tự động kéo dữ liệu khi tải trang Web.' : 'Đã tắt tự động tải khi mở Web. Bạn sẽ tự động chạy trong chế độ offline tinh gọn.', 'info');
+                    }}
+                    className="sr-only peer"
+                  />
+                  <div className="w-9 h-5 bg-slate-200 dark:bg-slate-750 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-650"></div>
+                </label>
+              </div>
+
+              {/* Hướng dẫn kiểm kê Offline */}
+              <div className="p-4 rounded-2xl bg-emerald-50/30 dark:bg-emerald-950/10 border border-emerald-150/30 dark:border-emerald-900/30 space-y-2">
+                <span className="text-xs font-black text-emerald-800 dark:text-emerald-450 uppercase tracking-wide flex items-center gap-1.5">
+                  <span className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-450 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                  </span>
+                  Làm Việc Ngoại Tuyến (Offline)
+                </span>
+                <p className="text-[11px] text-slate-555 dark:text-slate-400 leading-relaxed">
+                  Trình duyệt tự động lưu trữ 100% dữ liệu kiểm kê vào bộ nhớ máy chủ cục bộ (<code className="font-mono bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded text-[10px] text-emerald-650 dark:text-emerald-400">LocalStorage</code>) nên việc không có mạng được thiết kế tối ưu hóa hoàn toàn:
+                </p>
+                <ul className="text-[11px] text-slate-650 dark:text-slate-350 list-decimal pl-4.5 space-y-1 leading-relaxed">
+                  <li>Bạn có thể quét kiểm kê bằng Camera điện thoại hoặc gõ tay bình thường ở vùng sâu/hầm đài không có sóng 3G/Internet.</li>
+                  <li>Mọi thông số quét, ghi chú đều được cập nhật bền vững tại chỗ.</li>
+                  <li>Sau khi quét xong và trở lại vùng có mạng, hãy vào Cài Đặt và nhấn nút <strong className="text-indigo-600 dark:text-indigo-400">Đồng bộ Cloud (Đẩy lên Google Sheet)</strong> để cộng dồn vào bảng tính trung tâm!</li>
+                  <li>Có thể xuất tệp <strong className="text-indigo-650 dark:text-indigo-400">Sao lưu JSON Offline</strong> ở phía dưới để chuyển sang tài khoản khác khi cần.</li>
+                </ul>
               </div>
 
               {/* QUẢN LÝ PHÂN LOẠI THIẾT BỊ HOÀN TOÀN OFFLINE */}
@@ -4079,6 +4437,23 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* MOBILE FLOATING CAMERA ACCESS BUTTON */}
+      <button
+        onClick={() => {
+          setScanTargetItem(null);
+          setScanMode('camera');
+          setIsScannerOpen(true);
+          setScanMessage(null);
+          playScanBeep(1000, 0.1);
+        }}
+        className="fixed bottom-6 right-6 z-50 md:hidden w-14 h-14 bg-indigo-600 dark:bg-indigo-700 hover:bg-indigo-700 dark:hover:bg-indigo-650 text-white rounded-full shadow-2xl transition-all duration-300 transform active:scale-90 flex flex-col items-center justify-center border border-indigo-550 hover:border-indigo-450 group ring-4 ring-indigo-500/15 animate-bounce"
+        style={{ animationDuration: '3s' }}
+        title="Quét camera nhanh thiết bị"
+      >
+        <Camera className="w-5 h-5 text-white" />
+        <span className="text-[7.5px] uppercase font-black tracking-widest leading-none mt-1">SCAN</span>
+      </button>
 
     </div>
   );
