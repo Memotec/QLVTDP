@@ -6,7 +6,7 @@ import {defineConfig} from 'vite';
 export default defineConfig(() => {
   const isDev = process.env.NODE_ENV !== 'production' || process.env.DISABLE_HMR === 'true';
   return {
-    base: isDev ? '/' : '/QLVTDP/',
+    base: isDev ? '/' : './',
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {
