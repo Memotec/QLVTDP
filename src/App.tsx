@@ -761,7 +761,7 @@ export default function App() {
         </head>
         <body>
           <div class="header">
-            <div style="font-size: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 15px;">ĐỘI THÔNG TIN - KHO VẬT TƯ CNS/ATM</div>
+            <div style="font-size: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 15px;">ĐỘI THÔNG TIN - KHO VẬT TƯ DỰ PHÒNG TẠI CHỖ</div>
             <div class="title">BIÊN BẢN KIỂM KÊ THIẾT BỊ VÀ VẬT TƯ CHUYÊN NGÀNH</div>
             <div class="subtitle">Ngày tạo biên bản: ${today} - Người lập: ${role ? role.toUpperCase() : 'Guest'}</div>
           </div>
