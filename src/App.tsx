@@ -1170,8 +1170,8 @@ export default function App() {
             <tr>
               <td class="header-left">
                 <div style="text-transform: uppercase;">CÔNG TY QUẢN LÝ BAY MIỀN NAM</div>
-                <div style="text-transform: uppercase; font-weight: 900; margin-top: 3px;">TRUNG TÂM BĐKT-ĐỘI THÔNG TIN</div>
-                <div style="font-weight: normal; font-style: italic; margin-top: 2px;">Bộ phận: Quản lý Kho CNS/ATM</div>
+                <div style="text-transform: uppercase; font-weight: 900; margin-top: 3px;">TRUNG TÂM BẢO ĐẢM KỸ THUẬT</div>
+                <div style="font-weight: normal; font-style: italic; margin-top: 2px;">Bộ phận: Đội Thông Tin</div>
                 <div class="deco-line"></div>
               </td>
               <td class="header-right">
