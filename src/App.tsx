@@ -1851,7 +1851,7 @@ export default function App() {
                   <h1 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight flex items-center gap-2">
                     VẬT TƯ DỰ PHÒNG TẠI CHỖ ĐỘI THÔNG TIN
                     <span className="text-[9px] translate-y-[-4px] bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-400 px-2 py-0.5 rounded-full font-extrabold uppercase">
-                      Tổ Thông Tin
+                      Đội Thông Tin
                     </span>
                   </h1>
                   <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 mt-0.5">
