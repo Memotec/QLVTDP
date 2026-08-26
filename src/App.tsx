@@ -1703,7 +1703,7 @@ export default function App() {
                   <div key={item.id} className="label-print-item">
                     <div>
                       <div style={{ fontSize: '10px', color: '#444', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 'bold', borderBottom: '1px solid #ddd', paddingBottom: '3px', marginBottom: '5px' }}>
-                        TẬP ĐOÀN QUẢN LÝ BAY - ĐỘI THÔNG TIN
+                        TRUNG TÂM BẢO ĐẢM KỶ THUẬT - ĐỘI THÔNG TIN
                       </div>
                       <div style={{ fontSize: '13px', fontWeight: '800', lineHeight: '1.2', color: '#000', textTransform: 'uppercase' }}>
                         {item.name}
